@@ -11,3 +11,4 @@ ggez = "0.5.1"
 eyre = "0.6.5"
 rapier2d = { version = "0.8.0", features = [ "simd-stable" ] }
 nalgebra = "0.26.2"
+rand = "0.8.3"

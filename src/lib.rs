@@ -1,15 +1,22 @@
+use std::collections::HashMap;
+
+use entity_data::EntityData;
 use eyre::Result;
 use ggez::event::EventHandler;
-use ggez::graphics::{self, DrawMode, DrawParam, MeshBuilder, BLACK, WHITE};
+use ggez::graphics::{self, Color, DrawMode, DrawParam, MeshBuilder, BLACK, WHITE};
 use ggez::{timer, Context};
 use nalgebra::{Isometry2, Vector2};
+use rand::prelude::ThreadRng;
+use rand::{thread_rng, Rng};
 use rapier2d::dynamics::{
-    BodyStatus, CCDSolver, IntegrationParameters, JointSet, RigidBody, RigidBodyBuilder,
-    RigidBodySet,
+    BodyStatus, CCDSolver, IntegrationParameters, JointSet, MassProperties, RigidBody,
+    RigidBodyBuilder, RigidBodySet,
 };
 use rapier2d::geometry::{BroadPhase, ColliderBuilder, ColliderSet, NarrowPhase};
+use rapier2d::math::Point;
 use rapier2d::pipeline::PhysicsPipeline;
 
+mod entity_data;
 mod vector2;
 
 pub struct MainState {
@@ -22,13 +29,16 @@ pub struct MainState {
     colliders: ColliderSet,
     joints: JointSet,
     ccd_solver: CCDSolver,
+    rng: ThreadRng,
+    data: EntityData,
 }
 
 impl MainState {
     pub fn new(context: &mut Context) -> Result<Self> {
         let pipeline = PhysicsPipeline::new();
-        let gravity = vector2::Vector2::new(0.0, 255.81);
-        let integration_parameters = IntegrationParameters::default();
+        let gravity = vector2::Vector2::new(0.0, 25.0);
+        let mut integration_parameters = IntegrationParameters::default();
+        integration_parameters.max_position_iterations = 4;
         let mut broad_phase = BroadPhase::new();
         let mut narrow_phase = NarrowPhase::new();
         let mut bodies = RigidBodySet::new();
@@ -38,45 +48,6 @@ impl MainState {
         // We ignore physics hooks and contact events for now.
         let physics_hooks = ();
         let event_handler = ();
-
-        let rigid_body = RigidBodyBuilder::new(BodyStatus::Dynamic)
-            // The rigid body translation.
-            // Default: zero vector.
-            .translation(0.0, 5.0)
-            // The rigid body rotation.
-            // Default: no rotation.
-            .rotation(5.0)
-            // The rigid body position. Will override `.translation(...)` and `.rotation(...)`.
-            // Default: the identity isometry.
-            .position(Isometry2::new(vector2::Vector2::new(500.0, 200.0), 0.4))
-            // The linear velocity of this body.
-            // Default: zero velocity.
-            // .linvel(1.0, 2.0)
-            // The angular velocity of this body.
-            // Default: zero velocity.
-            // .angvel(2.0)
-            // Whether or not this body can sleep.
-            // Default: true
-            .can_sleep(true)
-            // Whether or not CCD is enabled for this rigid-body.
-            // Default: false
-            .ccd_enabled(false)
-            // .additional_mass(-10.5)
-            // All done, actually build the rigid-body.
-            .build();
-
-        let body_handle = bodies.insert(rigid_body);
-        let collider = ColliderBuilder::ball(10.0)
-            .density(0.5)
-            .restitution(1.0)
-            .build();
-        let platform = RigidBodyBuilder::new_static()
-            .position(Isometry2::new(vector2::Vector2::new(500.0, 300.0), 0.0))
-            .build();
-        let platform_handle = bodies.insert(platform);
-        let static_collider = ColliderBuilder::ball(10.0).build();
-        let collider_handle = colliders.insert(collider, body_handle, &mut bodies);
-        let static_handle = colliders.insert(static_collider, platform_handle, &mut bodies);
 
         Ok(Self {
             gravity,
@@ -88,7 +59,100 @@ impl MainState {
             colliders,
             joints,
             ccd_solver,
+            rng: thread_rng(),
+            data: EntityData::new(),
         })
+    }
+
+    fn create_ball(&mut self, context: &mut Context) {
+        let (width, height) = graphics::drawable_size(context);
+        let position = vector2::Vector2::new(self.rng.gen_range(20.0..width - 20.0), -10.0);
+        let color = Color::from_rgb(
+            self.rng.gen_range(150..255),
+            self.rng.gen_range(150..255),
+            self.rng.gen_range(150..255),
+        );
+        let data_id = self.data.insert_ball(10.0, color);
+        let body = RigidBodyBuilder::new(BodyStatus::Dynamic)
+            .position(Isometry2::new(position, 0.0))
+            .user_data(data_id)
+            .build();
+        let body_handle = self.bodies.insert(body);
+        let radius = 10.0;
+        let collider = ColliderBuilder::ball(radius).restitution(1.0).build();
+
+        self.colliders
+            .insert(collider, body_handle, &mut self.bodies);
+    }
+
+    pub fn setup(&mut self, context: &mut Context) {
+        self.create_platform(context);
+        self.create_left_wall(context);
+        self.create_right_wall(context);
+        // self.create_pillar(context);
+    }
+
+    fn create_platform(&mut self, context: &mut Context) {
+        let (width, height) = graphics::drawable_size(context);
+        let position = vector2::Vector2::new(width / 2.0, height - 10.0);
+        let id = self.data.insert_platform(0.0, height - 10.0, width, 10.0);
+        let body = RigidBodyBuilder::new_static()
+            .position(Isometry2::new(position, 0.0))
+            .user_data(id)
+            .build();
+
+        let body_handle = self.bodies.insert(body);
+        let collider = ColliderBuilder::cuboid(width / 2.0, 5.0).build();
+
+        self.colliders
+            .insert(collider, body_handle, &mut self.bodies);
+    }
+
+    fn create_left_wall(&mut self, context: &mut Context) {
+        let (_width, height) = graphics::drawable_size(context);
+        let position = Isometry2::new(vector2::Vector2::new(2.5, height / 2.0), 0.0);
+        let id = self.data.insert_platform(0.0, 0.0, 5.0, height);
+        let body = RigidBodyBuilder::new_static()
+            .position(position)
+            .user_data(id)
+            .build();
+        let body_handle = self.bodies.insert(body);
+        let collider = ColliderBuilder::cuboid(2.5, height / 2.0).build();
+        self.colliders
+            .insert(collider, body_handle, &mut self.bodies);
+    }
+
+    fn create_right_wall(&mut self, context: &mut Context) {
+        let (width, height) = graphics::drawable_size(context);
+        let position = Isometry2::new(vector2::Vector2::new(width - 2.5, height / 2.0), 0.0);
+        let id = self.data.insert_platform(width - 5.0, 0.0, 5.0, height);
+        let body = RigidBodyBuilder::new_static()
+            .position(position)
+            .user_data(id)
+            .build();
+        let body_handle = self.bodies.insert(body);
+        let collider = ColliderBuilder::cuboid(2.5, height / 2.0).build();
+        self.colliders
+            .insert(collider, body_handle, &mut self.bodies);
+    }
+
+    fn create_pillar(&mut self, context: &mut Context) {
+        let (width, height) = graphics::drawable_size(context);
+        let position = Isometry2::new(
+            vector2::Vector2::new(width / 2.0, height - height * 0.25),
+            0.0,
+        );
+        let id = self
+            .data
+            .insert_platform(width * 0.25, height * 0.5, width / 2.0, height / 2.0);
+        let body = RigidBodyBuilder::new_static()
+            .position(position)
+            .user_data(id)
+            .build();
+        let body_handle = self.bodies.insert(body);
+        let collider = ColliderBuilder::cuboid(width * 0.25, height * 0.25).build();
+        self.colliders
+            .insert(collider, body_handle, &mut self.bodies);
     }
 }
 
@@ -110,6 +174,14 @@ impl EventHandler for MainState {
                 &event_handler,
             );
         }
+        if timer::ticks(context) % 200 == 0 {
+            let fps = timer::fps(context);
+            if fps > 60.0 {
+                self.create_ball(context);
+                dbg!(self.bodies.len());
+                dbg!(timer::fps(&context));
+            }
+        }
         Ok(())
     }
 
@@ -120,14 +192,25 @@ impl EventHandler for MainState {
         for (handle, body) in self.bodies.iter() {
             let x = body.world_com.x;
             let y = body.world_com.y;
-            let radius = 10.0;
-            let location = [x, y];
-            mesh_builder.circle(DrawMode::fill(), location, radius, 0.1, WHITE);
+            let data_id = body.user_data;
+            match self.data.get_data_type(data_id) {
+                entity_data::DataType::Ball => {
+                    let radius = self.data.get_radius(data_id);
+                    let location = [x, y];
+                    let color = self.data.get_color(data_id);
+                    mesh_builder.circle(DrawMode::fill(), location, radius, 0.1, color);
+                }
+                entity_data::DataType::Platform => {
+                    let rect = self.data.get_rect(data_id);
+                    mesh_builder.rectangle(DrawMode::fill(), rect, WHITE);
+                }
+                entity_data::DataType::None => (),
+            }
         }
 
         let mesh = mesh_builder.build(context)?;
-
         graphics::draw(context, &mesh, DrawParam::default())?;
+
         graphics::present(context)
     }
 }
