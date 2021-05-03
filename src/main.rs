@@ -4,7 +4,7 @@ use ggez::conf::{WindowMode, WindowSetup};
 use ggez::{event, ContextBuilder};
 
 fn main() -> Result<()> {
-    let window_mode = WindowMode::default().dimensions(800.0, 1200.0);
+    let window_mode = WindowMode::default().dimensions(1280.0, 720.0);
     let window_setup = WindowSetup::default()
         .title("Exploring Rapier2d")
         .vsync(false);

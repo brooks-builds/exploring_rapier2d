@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use entity_data::EntityData;
 use eyre::Result;
-use ggez::event::EventHandler;
+use ggez::event::{EventHandler, KeyCode, KeyMods};
 use ggez::graphics::{self, Color, DrawMode, DrawParam, MeshBuilder, BLACK, WHITE};
 use ggez::{timer, Context};
 use nalgebra::{Isometry2, Vector2};
@@ -174,14 +174,19 @@ impl EventHandler for MainState {
                 &event_handler,
             );
         }
-        if timer::ticks(context) % 200 == 0 {
-            let fps = timer::fps(context);
-            if fps > 60.0 {
-                self.create_ball(context);
-                dbg!(self.bodies.len());
-                dbg!(timer::fps(&context));
-            }
+        if self.bodies.len() < 3400 {
+            self.create_ball(context);
+        } else if self.bodies.len() == 3400 {
+            dbg!("done");
         }
+        // if timer::ticks(context) % 200 == 0 {
+        //     let fps = timer::fps(context);
+        //     if fps > 60.0 {
+        //         self.create_ball(context);
+        //         dbg!(self.bodies.len());
+        //         dbg!(timer::fps(&context));
+        //     }
+        // }
         Ok(())
     }
 
@@ -212,5 +217,20 @@ impl EventHandler for MainState {
         graphics::draw(context, &mesh, DrawParam::default())?;
 
         graphics::present(context)
+    }
+
+    fn key_down_event(
+        &mut self,
+        context: &mut Context,
+        keycode: KeyCode,
+        _keymods: KeyMods,
+        _repeat: bool,
+    ) {
+        if let KeyCode::Space = keycode {
+            let screenshot = graphics::screenshot(context).unwrap();
+            screenshot
+                .encode(context, graphics::ImageFormat::Png, "/screenshot.png")
+                .unwrap();
+        }
     }
 }
